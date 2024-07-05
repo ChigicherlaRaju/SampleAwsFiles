@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Create an S3 bucket with replication and lifecycle policies
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket
+  SourceFolderName:
+    Type: String
+    Description: Name of the source folder
+  DestinationFolderName:
+    Type: String
+    Description: Name of the destination folder
+  ArchivingFolderName:
+    Type: String
+    Description: Name of the archiving folder
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveRule
+            Prefix: !Ref SourceFolderName
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 1/24
+          - Id: PurgeRule
+            Prefix: !Ref SourceFolderName
+            Status: Enabled
+            ExpirationInDays: 1
+
+  ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+
+  ReplicationPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ReplicationPolicy
+      Roles:
+        - !Ref ReplicationRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ReplicateObject
+              - s3:ReplicateDelete
+              - s3:ReplicateTags
+            Resource: !Sub "arn:aws:s3:::${BucketName}/*"
+
+  S3BucketReplicationConfiguration:
+    Type: AWS::S3::Bucket
+    Properties:
+      Bucket: !Ref S3Bucket
+      ReplicationConfiguration:
+        Role: !GetAtt ReplicationRole.Arn
+        Rules:
+          - Id: ReplicateToTarget
+            Prefix: !Ref SourceFolderName
+            Status: Enabled
+            Destination:
+              Bucket: !Sub "arn:aws:s3:::${BucketName}"
+              Prefix: !Ref DestinationFolderName
+
+Outputs:
+  BucketName:
+    Value: !Ref S3Bucket
+    Description: Name of the S3 bucket
